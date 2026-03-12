@@ -1,6 +1,6 @@
 ---
 name: summarize-transcript
-description: Create executive summary and detailed timeline from meeting transcripts. Use for Google Meet transcriptions or similar raw meeting records.
+description: Create executive summary and detailed timeline from meeting transcripts. Handles Gemini transcripts, Google Meet closed captions, and chat logs.
 argument-hint: <transcript-file-path> [output-file-path]
 disable-model-invocation: true
 allowed-tools: Read, Write, Agent
@@ -9,6 +9,28 @@ allowed-tools: Read, Write, Agent
 # Summarize Meeting Transcript
 
 Create an executive summary and detailed timeline from the meeting transcript at `$0`.
+
+## Transcript Source Detection
+
+Determine the transcript source type from the input filename:
+
+| Filename | Source Type | Notes |
+|---|---|---|
+| `closed-caption.md` | Google Meet Closed Captions | Scraped from DOM; lower quality (see below) |
+| `chat.md` | Meeting Chat Log | Text chat, not spoken word |
+| Anything else | Gemini Transcript | Higher quality, includes timestamps and speaker identification |
+
+### Closed Caption Quality Limitations
+
+Google Meet closed captions scraped from the DOM have significant quality differences from Gemini transcripts. The skill must account for these:
+
+1. **Incomplete participant list** — Closed captions only reliably show speakers whose names appeared in the caption stream. The People tab must be opened periodically during capture to get a fuller list. The attendee list should be marked as potentially incomplete.
+2. **Lower voice fidelity** — Speech-to-text is less accurate than Gemini's post-processed transcript. Expect more garbled words, missed words, and phonetic errors.
+3. **Out-of-order text** — Text for a speaker can appear out of sequence due to delayed processing. A speaker's statement may be split across non-adjacent lines or interleaved with other speakers' text in ways that don't reflect the actual conversation order.
+4. **No timestamps** — There are no timestamps in the closed caption output. Only the sequential order of text creation is available.
+5. **DOM index artifacts** — The captured output includes a numeric index from the DOM element where the caption was scraped. This index is not meaningful for summarization and should be ignored.
+
+When processing closed captions, apply extra scrutiny to speaker attribution and statement ordering. If the order of statements seems illogical, note it rather than silently reordering.
 
 The output contains two complementary sections:
 - **Summary** — A concise, topically-organized executive summary a reader can consume in 2-3 minutes
@@ -120,13 +142,21 @@ If the glossary file is not available, skip this step without error.
 
 ## Process
 
-### 1. Read the Transcript and Prepare Reference Material
+### 1. Read the Transcript, Detect Source Type, and Prepare Reference Material
+
+**Determine the source type** from the input filename (see Transcript Source Detection table above). This determines which quality caveats, timestamp handling, and attendee notes to apply throughout the summary.
 
 Read `$0` to understand:
 - Who the participants are
 - What the meeting was about
 - The overall flow and any confusion
 - Transcription quality issues (accents, technical terms, etc.)
+
+**For closed captions specifically:**
+- Ignore DOM index numbers in the input — they are scraping artifacts
+- Note that the participant list may be incomplete
+- Watch for out-of-order or interleaved speaker text caused by caption processing delays
+- Expect lower speech-to-text fidelity than Gemini transcripts
 
 Also attempt to read `~/source/handbook/The Ansible Engineering Handbook/Glossary/glossary.md`. If available, use it as a reference for correcting technical terms throughout the summary. If unavailable, proceed without it.
 
@@ -143,6 +173,7 @@ Create the summary file with:
 
 ### Attendees
 [List of attendees]
+[For closed captions, add: "**Note:** This list may be incomplete. Closed captions only capture speakers whose names appeared in the caption stream during recording."]
 
 ---
 
@@ -178,12 +209,14 @@ for particularly notable or strong statements.]
 
 ## Timeline of Discussion
 
-**Note: Time ranges are approximate based on [sparse/available] timestamps in transcript**
+**For Gemini transcripts:** "Note: Time ranges are approximate based on [sparse/available] timestamps in transcript"
+**For closed captions:** "Note: No timestamps are available. Sections reflect the sequential order of captions as captured. Due to closed caption processing delays, the order may not perfectly reflect the actual conversation flow."
 ```
 
 **Timeline Sections:**
 
-Use format: `### [Editorial: Descriptive Topic] (HH:MM:SS - HH:MM:SS)`
+For Gemini transcripts, use format: `### [Editorial: Descriptive Topic] (HH:MM:SS - HH:MM:SS)`
+For closed captions (no timestamps available), use format: `### [Editorial: Descriptive Topic]`
 
 For each speaker statement:
 - Use bold for speaker name: `**Name**`
@@ -204,15 +237,18 @@ For each speaker statement:
 - All content is based solely on statements in the transcript
 - No fabricated content has been added
 - Direct quotes are preserved where possible, including uncertain speech and incomplete thoughts
+- [For closed captions:] Source is Google Meet closed captions scraped from the DOM, which are lower fidelity than Gemini transcripts
 
 **Known Issues:**
 - [List transcription quality issues]
 - [Note accent-related misinterpretations]
-- [Note sparse timestamps or other limitations]
+- [For Gemini: Note sparse timestamps or other limitations]
+- [For closed captions: Note lack of timestamps, potential out-of-order text, incomplete participant list, and DOM index artifacts that were ignored]
 
 **Editorial Choices Made:**
 - Section headers in brackets [Editorial: ...] are organizational additions not stated by participants
-- Time ranges are approximate based on [available data]
+- [For Gemini:] Time ranges are approximate based on [available data]
+- [For closed captions:] No timestamps available; section ordering reflects caption sequence which may not perfectly match conversation flow
 - Rambling speech patterns preserved where they occurred
 - Uncertainty markers ("I don't know", "maybe", incomplete thoughts) deliberately preserved
 - Strong language preserved (e.g., [examples])
@@ -290,3 +326,5 @@ Show the user:
 - The Summary section should be concise and organized; the Timeline section should be verbatim-style and preserve full texture
 - When in doubt, preserve more detail rather than less in the Timeline
 - Use the Agent tool with a general-purpose subagent for verification to get thorough review
+- Closed captions are a fundamentally lower-quality source than Gemini transcripts — the output should clearly communicate this to readers so they calibrate their trust accordingly
+- Source type detection is filename-based and will evolve as new transcript sources are added
