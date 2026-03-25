@@ -1,50 +1,150 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+- Version change: N/A → 0.1.0
+- Added principles:
+  - I. Accuracy & Impartiality
+  - II. Source Fidelity
+  - III. Transparency
+  - IV. Graceful Degradation
+  - V. User Control
+- Added sections: Governance
+- Removed sections: SECTION_2, SECTION_3 (not needed for this project)
+- Templates requiring updates:
+  - .specify/templates/plan-template.md — ✅ no changes needed
+    (Constitution Check section is generic; gates are filled per-feature)
+  - .specify/templates/spec-template.md — ✅ no changes needed
+    (Template is domain-agnostic; principles apply at review time)
+  - .specify/templates/tasks-template.md — ✅ no changes needed
+    (Task structure is generic; principle compliance is a review concern)
+- Follow-up TODOs: none
+-->
+
+# Summarize-Transcript Skill Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Accuracy & Impartiality
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+The skill MUST produce output that contains only information
+clearly present in the source transcript(s). No context,
+assumptions, interpretations, or conclusions may be added
+beyond what participants stated.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+- Speaker positions in disagreements MUST be attributed to
+  the correct speaker.
+- Strong language MUST be preserved verbatim — never softened.
+- Direct quotes MUST be accurate.
+- Speculative or uncertain attributions MUST be marked
+  (e.g., `(likely "word")`, `(unclear term)`).
+- Action items and decisions MUST trace to specific statements
+  in the source material.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+Rationale: Fabricated or editorialized content erodes trust
+and can misrepresent participants' positions.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### II. Source Fidelity
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+The skill MUST preserve the texture and character of the
+original discussion. Summaries are not sanitized minutes —
+they are faithful records.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+- Uncertainty markers ("I don't know", "maybe", incomplete
+  thoughts) MUST be preserved in the Timeline section.
+- Rambling speech patterns, run-on sentences, and exploratory
+  dialogue MUST NOT be over-organized into clean bullet points.
+- Meeting confusion, scheduling issues, and process problems
+  MUST be included — they are context, not noise.
+- Transcription artifact cleanup (merged fillers, spurious
+  spaces) is permitted because it corrects engine errors, not
+  speaker intent.
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Rationale: Over-polishing a transcript creates a false
+impression of structure that did not exist. Readers need to
+calibrate how firm a decision was based on how it was discussed.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### III. Transparency
+
+Every editorial addition, limitation, and correction MUST be
+visible to the reader. The skill MUST NOT silently alter
+meaning or attribution.
+
+- Section headers added by the skill MUST use `[Editorial: ...]`
+  format.
+- Post-summary corrections MUST use square brackets
+  (`[corrected word]`) to distinguish them from original content.
+- Source quality limitations (closed-caption fidelity, missing
+  timestamps, incomplete attendee lists) MUST be disclosed in
+  the Document Status section.
+- When multiple sources are used, each MUST be listed with its
+  type (primary/supplementary) and any conflicts between sources
+  MUST be noted — never silently resolved.
+
+Rationale: Readers cannot assess trustworthiness without
+knowing what the skill added, what it could not verify, and
+where the source material was unreliable.
+
+### IV. Graceful Degradation
+
+The skill MUST produce useful output regardless of input
+completeness. Missing optional inputs reduce output quality
+but MUST NOT cause failure.
+
+- Missing roster file: proceed without roster-based name
+  resolution.
+- Missing metadata.json: infer meeting title and date from
+  transcript content.
+- Malformed roster file: report the parsing error clearly,
+  then proceed without roster-based resolution.
+- Missing glossary file: skip technical term correction
+  without error.
+- Single recognized file in a directory: behave identically
+  to single-file input mode.
+- No recognized files in a directory: inform the user and
+  stop — do not produce an empty summary.
+
+Rationale: Meeting transcripts arrive in unpredictable
+combinations. A skill that fails on missing optional inputs
+forces users into manual workarounds that defeat the purpose
+of automation.
+
+### V. User Control
+
+The user is the final authority on names, corrections, and
+output content. The skill provides defaults and suggestions
+but MUST NOT make irreversible decisions without user input.
+
+- Roster files are user-maintained artifacts — the skill reads
+  them but MUST NOT modify them without explicit user consent.
+- Post-hoc name corrections MUST be offered interactively, not
+  applied silently.
+- Unresolved names MUST be flagged for user review rather than
+  guessed at.
+- The skill MUST offer to persist corrections back to the
+  roster but MUST NOT do so without confirmation.
+
+Rationale: Automated name resolution will always have edge
+cases. Users who maintain their own rosters and approve
+corrections retain confidence in the output.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution is the authoritative guide for the
+summarize-transcript skill's behavior and design decisions.
+All specifications, plans, and implementations MUST comply
+with its principles.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+- **Amendments** require documentation of the change, the
+  rationale, and a version bump following semantic versioning:
+  - MAJOR: Principle removal or backward-incompatible
+    redefinition.
+  - MINOR: New principle added or existing principle
+    materially expanded.
+  - PATCH: Clarifications, wording fixes, non-semantic
+    refinements.
+- **Compliance review**: Each spec and plan MUST include a
+  Constitution Check verifying alignment with these principles.
+- **Conflict resolution**: If a design decision conflicts with
+  a principle, the decision MUST either be revised or the
+  constitution amended — silent non-compliance is not permitted.
+
+**Version**: 0.1.0 | **Ratified**: 2026-03-24 | **Last Amended**: 2026-03-24
