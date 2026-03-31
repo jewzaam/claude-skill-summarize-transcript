@@ -74,40 +74,9 @@ When `gemini-notes.md` is present (from a Google Doc Notes tab or manually creat
 - They serve the same role (providing meeting context) but for different source pipelines
 - If both are present (unlikely), `gemini-notes` takes precedence for conflicting fields
 
-### Closed Caption Format
+### Closed Caption and Chat Log Formats
 
-Closed caption files have two sections:
-
-**Attendee header** — Structured block listing participants with roles and timestamps:
-```
-=== ATTENDEES ===
-
-IN THE MEETING (Contributors):
-- Name (first seen: HH:MM:SS, last seen: HH:MM:SS)
-- Name [presenting] (first seen: HH:MM:SS, last seen: HH:MM:SS)
-- Name [Meeting host] (first seen: HH:MM:SS, last seen: HH:MM:SS)
-
-=================
-```
-Extract the attendee list from this section. Role annotations (`[presenting]`, `[Meeting host]`) are useful context — include them in the Attendees section of the summary. The first/last seen times are in the meeting organizer's local timezone (not UTC). Use metadata `startTime` (UTC) to determine the offset if timezone alignment with chat timestamps is needed.
-
-**Caption entries** — Sequential lines of captured speech:
-```
-[index] Speaker Name : Caption text here
-```
-The numeric index is a DOM element position from the scraping tool — ignore it for summarization purposes. The speaker name and caption text are the meaningful content.
-
-### Closed Caption Quality Limitations
-
-Google Meet closed captions scraped from the DOM have significant quality differences from Gemini transcripts:
-
-1. **Incomplete participant list** — Closed captions only reliably show speakers whose names appeared in the caption stream. The attendee header may also list non-speaking participants if the People tab was captured, but this is not guaranteed.
-2. **Lower voice fidelity** — Speech-to-text is less accurate than Gemini's post-processed transcript. Expect more garbled words, missed words, and phonetic errors.
-3. **Out-of-order text** — Text for a speaker can appear out of sequence due to delayed processing. A speaker's statement may be split across non-adjacent lines or interleaved with other speakers' text in ways that don't reflect the actual conversation order.
-4. **No per-entry timestamps** — Individual caption entries have no timestamps. Only the sequential order of capture and the attendee first/last seen times are available.
-5. **DOM index artifacts** — The numeric index prefix on each entry is a scraping artifact, not meaningful for summarization.
-
-When processing closed captions, apply extra scrutiny to speaker attribution and statement ordering. If the order of statements seems illogical, note it rather than silently reordering.
+See `references/source-formats.md` for detailed format specifications for closed caption files and chat logs, including quality limitations and timestamp handling.
 
 ### Knitting Multiple Sources
 
@@ -166,21 +135,7 @@ start with the API layer...
 **[Chat] Carol:** +1, API layer first makes sense. I can take the auth service piece.
 ```
 
-**Chat Log Format Expectations:**
-
-Google Meet chat logs captured via browser extension typically follow this format:
-```
-[ISO-8601-timestamp] Sender Name: message text
-```
-For example: `[2026-03-16T14:05:48.831Z] Naveen Malik: Your customers are other groups in Red Hat, right?`
-
-Key characteristics:
-- Timestamps are in UTC (ISO 8601 with `Z` suffix)
-- Multi-line messages may span consecutive lines with the same timestamp prefix, or continuation lines without a prefix
-- A single sender may have multiple consecutive messages with identical or near-identical timestamps (batch sends)
-- Messages may contain URLs that span their own line
-
-When knitting with closed captions, note that CC attendee times are in local timezone while chat timestamps are UTC. Use `metadata.json` `startTime` (UTC) to calculate the offset for alignment.
+**Chat Log Format:** See `references/source-formats.md` for chat log format details and timestamp handling.
 
 ### Chat-Only Summary Rules
 
@@ -198,6 +153,71 @@ The output contains two complementary sections:
 - **Timeline** — A chronological, verbatim-style record preserving the full texture of the discussion
 
 Output file: `$1` (defaults to `summary.md` in the same directory as the transcript).
+
+## YAML Frontmatter
+
+Every summary file MUST begin with a YAML frontmatter block. This structured metadata enables indexing, search, and cross-meeting queries. The frontmatter is extracted from the transcript content during summarization — do not fabricate any fields.
+
+**Format:**
+
+```yaml
+---
+title: "Meeting Title"
+date: "YYYY-MM-DD"
+meeting_code: "xxx-xxxx-xxx"
+attendees:
+  - "Alice Smith"
+  - "Bob Jones"
+topics:
+  - "API migration progress"
+  - "Release blocker discussion"
+decisions:
+  - "Defer GCP migration to Q3"
+  - "Use new auth middleware for all services"
+action_items:
+  - owner: "Alice Smith"
+    action: "Update SDP with new timeline"
+  - owner: "Bob Jones"
+    action: "File OCPBUGS ticket for auth regression"
+references:
+  - type: jira
+    value: "OCPBUGS-1234"
+  - type: jira
+    value: "CNTRLPLANE-99"
+  - type: anstrat
+    value: "ANSTRAT-42"
+keywords:
+  - "hypershift"
+  - "GCP"
+  - "auth middleware"
+---
+```
+
+**Field rules:**
+
+| Field | Required | Source | Notes |
+|---|---|---|---|
+| `title` | Yes | `metadata.json`, `gemini-notes`, or inferred | Meeting title |
+| `date` | Yes | `metadata.json` date field or directory name | YYYY-MM-DD format |
+| `meeting_code` | No | `metadata.json` meetingCode field | Omit if unavailable |
+| `attendees` | Yes | All sources merged | Full names, no role annotations (those go in the body) |
+| `topics` | Yes | Extracted from summary | 3-8 short phrases capturing the major discussion areas |
+| `decisions` | No | Extracted from summary | Concrete decisions made — omit if none |
+| `action_items` | No | Extracted from summary | Each has `owner` and `action` — omit if none identified |
+| `references` | No | Pattern-matched from all sources | Jira tickets (`PROJ-NNN`), ANSTRAT references, notable URLs shared in chat — omit if none found |
+| `keywords` | Yes | Extracted from summary | 3-10 significant technical terms, project names, or domain concepts discussed — not generic words |
+
+**Reference detection patterns:**
+- **Jira tickets:** Match `[A-Z][A-Z0-9]+-\d+` patterns (e.g., `OCPBUGS-1234`, `CNTRLPLANE-99`, `MGMT-456`). Use `type: jira`.
+- **ANSTRAT references:** Match `ANSTRAT-\d+` or references to specific ANSTRATs by number. Use `type: anstrat`.
+- **Notable URLs:** URLs shared in chat or verbally spelled out that represent action items, tracking issues, or reference material. Do NOT include meeting URLs, calendar links, or attachment URLs already in the Sources section. Use `type: url`.
+
+**Keyword extraction guidance:**
+- Include project names (e.g., "HyperShift", "ROSA"), technology terms, team names, and domain concepts
+- Exclude generic words like "meeting", "discussion", "team", "update"
+- Prefer the canonical form of terms (e.g., "HyperShift" not "hypershift")
+
+The frontmatter block must be the very first content in the file, before the `# [Meeting Title]` header.
 
 ## CRITICAL: Accuracy and Impartiality Requirements
 
@@ -303,63 +323,7 @@ If the glossary file is not available, skip this step without error.
 
 ## Google Doc Fetch & Convert
 
-When `$0` is a Google Docs URL, perform this conversion before proceeding to the Process steps.
-
-### 1. Extract Document ID
-
-Parse the URL to extract the document ID — the string between `/d/` and the next `/` or end of path. Ignore any `?tab=` or other query parameters.
-
-Example: `https://docs.google.com/document/d/1vFEl8EjvJhEjt-YAMfJBx2mfXiF4n54FOLtJ0C7fuVk/edit?tab=t.g3njhwyfs80l`
-→ Document ID: `1vFEl8EjvJhEjt-YAMfJBx2mfXiF4n54FOLtJ0C7fuVk`
-
-### 2. Fetch the Document
-
-```bash
-gws docs documents get --params '{"documentId":"<ID>","includeTabsContent":true,"suggestionsViewMode":"PREVIEW_SUGGESTIONS_ACCEPTED"}' 2>/dev/null
-```
-
-- `includeTabsContent:true` is required to get all tabs; without it only the first tab is returned
-- `suggestionsViewMode: PREVIEW_SUGGESTIONS_ACCEPTED` returns clean text without suggestion markers
-
-If `gws` returns a non-zero exit code or empty output, report the error to the user and stop. Common failures: auth not configured (suggest `gws auth login --readonly -s docs,drive`), document not found, permission denied.
-
-### 3. Convert Tabs to Markdown
-
-The response JSON contains `doc.tabs[]`. For each tab, convert `documentTab.body.content[]` to markdown using these mappings:
-
-| Docs API Element | Markdown |
-|---|---|
-| `HEADING_2` paragraph | `##` |
-| `HEADING_3` paragraph | `###` |
-| `NORMAL_TEXT` paragraph | plain paragraph |
-| `textRun` with `bold` style | `**text**` |
-| `textRun` with `strikethrough` style | `~~text~~` |
-| `textRun` with `link.url` style | `[text](url)` |
-| `person` element | `@Name` (or `~~@Name~~` if strikethrough) |
-| `richLink` element | `[title](uri)` |
-| `\x0b` in text content | line break (`\n`) |
-| `\xa0` in text content | strip or normalize to regular space |
-| `\ue907` prefix in text content | `- ` (list item) |
-| `sectionBreak` | blank line |
-| `horizontalRule` | `---` |
-
-Note: `HEADING_1` is not used in Gemini meeting docs (the document title is metadata, not a structural element). Unknown or unhandled element types (e.g., `dateElement`, `table`, `inlineObjectElement`) should be skipped silently. If they contain extractable text content, include it as plain text.
-
-### 4. Write Files to Working Directory
-
-Create a working directory under the current working directory, named from the document title (slugified: lowercase, spaces→hyphens, non-alphanumeric stripped).
-
-Write each tab as a markdown file:
-
-| Tab Title | Output Filename |
-|---|---|
-| "Notes" | `gemini-notes.md` |
-| "Transcript" | `gemini-transcript.md` |
-| Other tab names | slugified: lowercase, spaces→hyphens, `.md` extension |
-
-### 5. Continue as Directory Input
-
-Set the working directory as `$0` and proceed to the Process steps below. The directory now contains markdown files that the existing source detection and knitting logic can handle.
+When `$0` is a Google Docs URL, follow the procedure in `references/google-doc-fetch.md` to fetch the document, convert tabs to markdown files, and write them to a working directory. Then proceed to the Process steps below with `$0` set to that directory.
 
 ## Process
 
@@ -401,9 +365,15 @@ Create the summary file with:
 
 **Header Structure:**
 
-Use `metadata.json` values for title and date when available. Otherwise infer from transcript content.
+Use `metadata.json` values for title and date when available. Otherwise infer from transcript content. The file begins with YAML frontmatter (see YAML Frontmatter section above), followed by the markdown header:
 
 ```markdown
+---
+title: "Meeting Title"
+date: "YYYY-MM-DD"
+[... full frontmatter as specified above ...]
+---
+
 # [Meeting Title from metadata or inferred]
 ## Meeting Date: [Date from metadata or inferred]
 
@@ -531,40 +501,7 @@ For chat log entries interleaved into the timeline:
 
 ### 3. Verify Accuracy and Impartiality
 
-Use the Agent tool to launch a general-purpose agent to verify the summary. Pass the paths to all source files and the summary file.
-
-```
-Verify the accuracy and impartiality of the summary file against all source transcript files.
-
-Read all source files and the summary, then check:
-
-**Executive Summary section:**
-1. Contains only information clearly stated in the source files
-2. No added context, assumptions, or interpretations beyond what was discussed
-3. Key decisions, conflicts, and action items are accurately represented
-4. Speaker positions in disagreements are correctly attributed
-5. No significant topics omitted
-6. Direct quotes (if any) are accurate
-
-**Timeline section:**
-7. Timeline accurately reflects the order of discussion
-8. No misrepresentations or bias in how information is presented
-9. No significant omissions
-10. Speaker attributions are correct
-11. Uncertainty, confusion, and rambling nature are preserved (for spoken-word sources)
-12. Strong language is not softened
-13. Editorial additions are properly marked
-14. Chat entries (if any) are attributed with [Chat] prefix and placed at reasonable chronological positions
-
-Provide a detailed verification report with:
-- Overall assessment of accuracy and impartiality
-- Specific instances where summary adds context not in any source (if any)
-- Specific instances of inaccuracies or misattributions (if any)
-- Notable omissions (if any)
-- Recommendations for corrections (if needed)
-
-Be thorough and critical. The goal is to ensure the summary is factual and doesn't add interpretations or assumptions.
-```
+Use the Agent tool to launch a general-purpose agent to verify the summary. Pass the paths to all source files and the summary file. Read `agents/verifier.md` and include its contents as the agent's instructions.
 
 ### 4. Review and Revise
 
