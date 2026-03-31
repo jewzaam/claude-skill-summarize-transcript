@@ -1,9 +1,9 @@
 ---
 name: summarize-transcript
 description: Create executive summary and detailed timeline from meeting transcripts. Handles Gemini transcripts, Google Meet closed captions, and chat logs — individually or combined.
-argument-hint: <transcript-file-or-directory> [output-file-path]
+argument-hint: <transcript-file-directory-or-google-doc-url> [output-file-path]
 disable-model-invocation: true
-allowed-tools: Read, Write, Agent, Glob
+allowed-tools: Read, Write, Agent, Glob, Bash
 ---
 
 # Summarize Meeting Transcript
@@ -12,12 +12,13 @@ Create an executive summary and detailed timeline from meeting transcript(s) at 
 
 ## Input Modes
 
-`$0` can be either a single file or a directory:
+`$0` can be a single file, a directory, or a Google Docs URL:
 
 - **Single file** — Summarize that one transcript
 - **Directory** — Scan for all recognized transcript files and combine them into a single unified summary (see Knitting Multiple Sources below)
+- **Google Doc URL** — When `$0` is a Google Docs URL (matches `docs.google.com/document/d/<ID>`), fetch the document, convert each tab to markdown, and write files to a working directory. Then proceed as a directory input. See the Google Doc Fetch & Convert section below.
 
-To detect whether `$0` is a file or directory, attempt to Read it. If Read fails (directories can't be read as files), treat it as a directory and use Glob to find all files in it. Classify each by filename (see Transcript Source Detection table). Process all recognized files together.
+To detect the input mode: first check if `$0` matches a Google Docs URL pattern (`docs.google.com/document/d/`). If so, use the Google Doc Fetch & Convert flow below. Otherwise, attempt to Read it. If Read fails (directories can't be read as files), treat it as a directory and use Glob to find all files in it. Classify each by filename (see Transcript Source Detection table). Process all recognized files together.
 
 If a directory contains no recognized transcript or metadata files, inform the user and stop — there's nothing to summarize.
 
@@ -30,6 +31,7 @@ Determine the transcript source type from each input filename. Match on the base
 | `closed-caption` | Google Meet Closed Captions | Scraped from DOM; lower quality (see below) |
 | `chat` | Meeting Chat Log | Text chat, not spoken word |
 | `metadata` (`.json`) | Meeting Metadata | Title, date, start time, meeting URL (see below) |
+| `gemini-notes` | Gemini Meeting Notes | Supplementary; provides attendees, title, attachments, Gemini summary/details (see below) |
 | Anything else | Gemini Transcript | Higher quality, includes timestamps and speaker identification |
 
 ### Meeting Metadata
@@ -51,6 +53,26 @@ When a `metadata.json` file is present in the directory, read it to populate the
 - Use `startTime` to establish the meeting's timezone context — compare it against timestamps in other sources to determine UTC offsets for chronological alignment
 - `meetingUrl` and `meetingCode` can be included in the summary header if present
 - Metadata is never the primary source — it supplements whatever transcript files are present
+
+### Gemini Meeting Notes
+
+When `gemini-notes.md` is present (from a Google Doc Notes tab or manually created), it provides meeting metadata and supplementary context.
+
+**Metadata extraction:**
+- Meeting title: from the first `HEADING_2` (`##`) in the notes
+- Attendees: from the "Invited" section listing participants. Strikethrough names (`~~@Name~~`) indicate removed invitees. Role annotations (e.g., presenting, host) are preserved if present.
+- Attachments: from "Attachments" and "Meeting records" sections containing links — these become links in the summary header
+
+**Supplementary content:**
+- Gemini's "Summary" and "Details" sections are available for cross-referencing against the transcript
+- They are NOT echoed verbatim into the summary — the summary is built from the transcript
+- They can help resolve ambiguous speaker attributions or fill gaps where the transcript is unclear
+
+**Relationship to metadata.json:**
+- `metadata.json` remains the metadata source for closed-caption workflows
+- `gemini-notes` is the metadata source for Google Meet Gemini workflows
+- They serve the same role (providing meeting context) but for different source pipelines
+- If both are present (unlikely), `gemini-notes` takes precedence for conflicting fields
 
 ### Closed Caption Format
 
@@ -95,6 +117,7 @@ When multiple transcript sources are available from the same meeting (e.g., a di
 
 1. **Identify the primary source** — Use the highest-quality transcript as the backbone:
    - Gemini transcript (best) > Closed captions > Chat-only
+   - When Gemini notes are present alongside a Gemini transcript, the transcript is primary and notes are supplementary (metadata + cross-reference only).
    - If both a Gemini transcript and closed captions exist, prefer the Gemini transcript for the spoken-word timeline. Use closed captions only to fill gaps or resolve ambiguities.
    - When all three are present (Gemini + CC + chat): use Gemini as primary, ignore CC unless it fills gaps in the Gemini transcript, and interleave chat entries into the timeline.
 
@@ -117,6 +140,7 @@ When multiple transcript sources are available from the same meeting (e.g., a di
    ```markdown
    ### Sources
    - `transcript.md` — Gemini transcript (primary)
+   - `gemini-notes.md` — Gemini meeting notes (supplementary — metadata)
    - `chat.md` — Meeting chat log (supplementary)
    ```
    List each file with its detected source type and whether it was primary or supplementary.
@@ -277,9 +301,71 @@ If the glossary file is not available, skip this step without error.
 
 **Note:** Square brackets in Markdown don't require escaping - `[text]` renders as literal brackets since there's no `(url)` following it.
 
+## Google Doc Fetch & Convert
+
+When `$0` is a Google Docs URL, perform this conversion before proceeding to the Process steps.
+
+### 1. Extract Document ID
+
+Parse the URL to extract the document ID — the string between `/d/` and the next `/` or end of path. Ignore any `?tab=` or other query parameters.
+
+Example: `https://docs.google.com/document/d/1vFEl8EjvJhEjt-YAMfJBx2mfXiF4n54FOLtJ0C7fuVk/edit?tab=t.g3njhwyfs80l`
+→ Document ID: `1vFEl8EjvJhEjt-YAMfJBx2mfXiF4n54FOLtJ0C7fuVk`
+
+### 2. Fetch the Document
+
+```bash
+gws docs documents get --params '{"documentId":"<ID>","includeTabsContent":true,"suggestionsViewMode":"PREVIEW_SUGGESTIONS_ACCEPTED"}' 2>/dev/null
+```
+
+- `includeTabsContent:true` is required to get all tabs; without it only the first tab is returned
+- `suggestionsViewMode: PREVIEW_SUGGESTIONS_ACCEPTED` returns clean text without suggestion markers
+
+If `gws` returns a non-zero exit code or empty output, report the error to the user and stop. Common failures: auth not configured (suggest `gws auth login --readonly -s docs,drive`), document not found, permission denied.
+
+### 3. Convert Tabs to Markdown
+
+The response JSON contains `doc.tabs[]`. For each tab, convert `documentTab.body.content[]` to markdown using these mappings:
+
+| Docs API Element | Markdown |
+|---|---|
+| `HEADING_2` paragraph | `##` |
+| `HEADING_3` paragraph | `###` |
+| `NORMAL_TEXT` paragraph | plain paragraph |
+| `textRun` with `bold` style | `**text**` |
+| `textRun` with `strikethrough` style | `~~text~~` |
+| `textRun` with `link.url` style | `[text](url)` |
+| `person` element | `@Name` (or `~~@Name~~` if strikethrough) |
+| `richLink` element | `[title](uri)` |
+| `\x0b` in text content | line break (`\n`) |
+| `\xa0` in text content | strip or normalize to regular space |
+| `\ue907` prefix in text content | `- ` (list item) |
+| `sectionBreak` | blank line |
+| `horizontalRule` | `---` |
+
+Note: `HEADING_1` is not used in Gemini meeting docs (the document title is metadata, not a structural element). Unknown or unhandled element types (e.g., `dateElement`, `table`, `inlineObjectElement`) should be skipped silently. If they contain extractable text content, include it as plain text.
+
+### 4. Write Files to Working Directory
+
+Create a working directory under the current working directory, named from the document title (slugified: lowercase, spaces→hyphens, non-alphanumeric stripped).
+
+Write each tab as a markdown file:
+
+| Tab Title | Output Filename |
+|---|---|
+| "Notes" | `gemini-notes.md` |
+| "Transcript" | `gemini-transcript.md` |
+| Other tab names | slugified: lowercase, spaces→hyphens, `.md` extension |
+
+### 5. Continue as Directory Input
+
+Set the working directory as `$0` and proceed to the Process steps below. The directory now contains markdown files that the existing source detection and knitting logic can handle.
+
 ## Process
 
 ### 1. Read the Transcript(s), Detect Source Types, and Prepare Reference Material
+
+**If `$0` was a Google Doc URL:** The Google Doc Fetch & Convert section above has already converted the document tabs to markdown files in a working directory. `$0` is now that directory. Proceed with directory-mode detection below.
 
 **Determine input mode:**
 - If `$0` is a directory, use Glob to find files in it (e.g., `*.md`, `*.txt`, `*.json`). Classify each by base filename (see Transcript Source Detection table). Identify the primary source (highest quality transcript) and supplementary sources.
