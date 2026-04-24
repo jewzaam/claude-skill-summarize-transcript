@@ -2,7 +2,7 @@
 name: summarize-transcript
 description: Summarize a meeting transcript into an executive summary and detailed timeline. Use when asked to "summarize the transcript for X", "summarize this meeting", "create meeting notes from", or given a transcript file, directory of transcript files, or Google Doc URL to summarize. Handles Gemini transcripts, Google Meet closed captions, and chat logs — individually or combined.
 argument-hint: path/to/transcript-or-directory-or-google-doc-url [output-file-path]
-allowed-tools: Read, Write, Agent, Glob, Bash
+allowed-tools: Read, Agent, Glob
 ---
 
 # Summarize Meeting Transcript
